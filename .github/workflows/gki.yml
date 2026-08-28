@@ -60,7 +60,10 @@ jobs:
         working-directory: ${{ env.BUILD_DIR }}/common
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-          rm -f android/abi_gki_protected_exports_aarch64 android/abi_gki_protected_exports_x86_64
+          # файлы объявлены входами Bazel — УДАЛЯТЬ нельзя, только опустошить,
+          # иначе "missing input file". Пустой список = protected exports нет.
+          : > android/abi_gki_protected_exports_aarch64
+          : > android/abi_gki_protected_exports_x86_64
           git -C KernelSU-Next log --oneline -1
 
       - name: Фрагмент defconfig (без cfg80211/mac80211/BT/SND/IKHEADERS/BPF_LSM)
