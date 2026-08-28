@@ -47,7 +47,7 @@ jobs:
       - name: Синхронизация ACK common-android14-6.1
         working-directory: ${{ env.BUILD_DIR }}
         run: |
-          repo init --depth=1 --no-color \
+          repo init --depth=1 \
             -u https://android.googlesource.com/kernel/manifest \
             -b common-android14-6.1
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle \
@@ -170,11 +170,16 @@ jobs:
           DEFCONFIG
           tail -5 arch/arm64/configs/gki_defconfig
 
-      - name: Отключить check_defconfig
-        working-directory: ${{ env.BUILD_DIR }}/common
+      - name: Отключить check_defconfig (build.config.gki)
+        working-directory: ${{ env.BUILD_DIR }}
         run: |
-          sed -i -E 's/check_defconfig = "(minimized|match)"/check_defconfig = "disabled"/g' BUILD.bazel || true
-          grep -n "check_defconfig" BUILD.bazel || echo "атрибут не найден — ок, работаем через --notrim"
+          # Kleaf мапит POST_DEFCONFIG_CMDS из legacy build.config.gki
+          # в свою проверку check_defconfig — чистим именно там
+          sed -i 's/check_defconfig//' common/build.config.gki
+          echo "--- POST_DEFCONFIG_CMDS после правки: ---"
+          grep -n "POST_DEFCONFIG_CMDS" common/build.config.gki || echo "!! строка не найдена"
+          # убираем -maybe-dirty из строки версии (дерево модифицировано)
+          sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" build/kernel/kleaf/impl/stamp.bzl 2>/dev/null || true
 
       - name: Сборка (Kleaf, без LTO)
         working-directory: ${{ env.BUILD_DIR }}
