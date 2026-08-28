@@ -9,22 +9,31 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Освободить диск (отдать /mnt под сборку, ~74 ГБ)
-        uses: easimon/maximize-build-disk-space@v10
-        with:
-          root-reserve-mb: 8192
-          swap-size-mb: 8192
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-          build-mount-path: /kernel
+      - name: Освободить диск (без сторонних actions)
+        run: |
+          sudo docker system prune -af --volumes >/dev/null 2>&1 || true
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /opt/hostedtoolcache \
+                      /usr/local/share/boost /usr/share/swift 2>/dev/null || true
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /swapfile 2>/dev/null || true
+          echo "--- место после очистки ---"
+          df -h / /mnt
+          AVAIL=$(df --output=avail -BG /mnt | tail -1 | tr -dc '0-9')
+          AVAIL=${AVAIL:-0}
+          if [ "$AVAIL" -ge 45 ]; then
+            sudo mkdir -p /mnt/kernel
+            sudo chown -R $USER:$USER /mnt/kernel
+            echo "BUILD_DIR=/mnt/kernel" >> "$GITHUB_ENV"
+          else
+            echo "::warning::на /mnt мало места (${AVAIL}G), собираем в workspace"
+            mkdir -p "$GITHUB_WORKSPACE/kernel"
+            echo "BUILD_DIR=$GITHUB_WORKSPACE/kernel" >> "$GITHUB_ENV"
+          fi
 
       - name: Подготовка окружения
         run: |
-          sudo chown -R $USER:$USER /kernel
-          df -h /kernel && nproc && free -g
+          df -h "$BUILD_DIR" && nproc && free -g
           sudo apt-get update -qq
           sudo apt-get install -y -qq git curl zip unzip rsync lz4
           mkdir -p ~/.bin
@@ -36,7 +45,7 @@ jobs:
           git config --global color.ui false
 
       - name: Синхронизация ACK common-android14-6.1
-        working-directory: /kernel
+        working-directory: $ env.BUILD_DIR​NOTION_TWS[ ]NOTION_TWS​
         run: |
           repo init --depth=1 --no-color \
             -u https://android.googlesource.com/kernel/manifest \
@@ -48,24 +57,21 @@ jobs:
           head -1 common/Makefile
 
       - name: KernelSU-Next + снятие protected exports
-        working-directory: /kernel/common
+        working-directory: $ env.BUILD_DIR /common
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-          # обязательно для android14 GKI: иначе Wi-Fi/BT сток-модули не грузятся
           rm -f android/abi_gki_protected_exports_aarch64 android/abi_gki_protected_exports_x86_64
           git -C KernelSU-Next log --oneline -1
 
       - name: Фрагмент defconfig (без cfg80211/mac80211/BT/SND/IKHEADERS/BPF_LSM)
-        working-directory: /kernel/common
+        working-directory: $ env.BUILD_DIR /common
         run: |
           cat >> arch/arm64/configs/gki_defconfig <<'DEFCONFIG'
           # ==== CUSTOM GKI — CMF Phone 1 (tetris), KMI android14-11 ====
-          # --- KernelSU-Next (kprobes) ---
           CONFIG_KSU=y
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
           CONFIG_KPROBE_EVENTS=y
-          # --- ipset + nftables (Ladon / anti-DPI) ---
           CONFIG_IP_SET=y
           CONFIG_IP_SET_MAX=256
           CONFIG_IP_SET_BITMAP_IP=y
@@ -95,13 +101,11 @@ jobs:
           CONFIG_NETFILTER_XT_MATCH_OSF=y
           CONFIG_NETFILTER_XT_MATCH_RECENT=y
           CONFIG_NETFILTER_XT_TARGET_TPROXY=y
-          # --- BBR ---
           CONFIG_TCP_CONG_BBR=y
           CONFIG_DEFAULT_BBR=y
           CONFIG_DEFAULT_TCP_CONG="bbr"
           CONFIG_NET_SCH_CAKE=y
           CONFIG_NET_SCH_FQ=y
-          # --- Termux / chroot / контейнеры ---
           CONFIG_SYSVIPC=y
           CONFIG_POSIX_MQUEUE=y
           CONFIG_CGROUP_DEVICE=y
@@ -115,10 +119,8 @@ jobs:
           CONFIG_VETH=y
           CONFIG_FHANDLE=y
           CONFIG_SECCOMP=y
-          # --- CRIU / KSM ---
           CONFIG_CHECKPOINT_RESTORE=y
           CONFIG_KSM=y
-          # --- Файловые системы (+ NLS) ---
           CONFIG_NLS=y
           CONFIG_NLS_DEFAULT="utf8"
           CONFIG_NLS_UTF8=y
@@ -140,7 +142,6 @@ jobs:
           CONFIG_SQUASHFS_XZ=y
           CONFIG_SQUASHFS_LZ4=y
           CONFIG_SQUASHFS_ZSTD=y
-          # --- аудит / диагностика ---
           CONFIG_USB_MON=y
           CONFIG_NET_DROP_MONITOR=y
           CONFIG_PACKET_DIAG=y
@@ -152,7 +153,6 @@ jobs:
           CONFIG_IKCONFIG=y
           CONFIG_IKCONFIG_PROC=y
           CONFIG_BPF_EVENTS=y
-          # --- USB-OTG периферия (в GKI отсутствует — builtin безопасен) ---
           CONFIG_USB_ACM=y
           CONFIG_USB_SERIAL=y
           CONFIG_USB_SERIAL_GENERIC=y
@@ -171,28 +171,28 @@ jobs:
           tail -5 arch/arm64/configs/gki_defconfig
 
       - name: Отключить check_defconfig
-        working-directory: /kernel/common
+        working-directory: $ env.BUILD_DIR /common
         run: |
           sed -i -E 's/check_defconfig = "(minimized|match)"/check_defconfig = "disabled"/g' BUILD.bazel || true
           grep -n "check_defconfig" BUILD.bazel || echo "атрибут не найден — ок, работаем через --notrim"
 
       - name: Сборка (Kleaf, без LTO)
-        working-directory: /kernel
+        working-directory: $ env.BUILD_DIR​NOTION_TWS[ ]NOTION_TWS​
         run: |
           tools/bazel run --config=fast --lto=none --notrim --allow_undeclared_modules \
-            //common:kernel_aarch64_dist -- --destdir=/kernel/out/dist \
+            //common:kernel_aarch64_dist -- --destdir="$BUILD_DIR/out/dist" \
           || tools/bazel run --config=fast --lto=none --notrim --allow_undeclared_modules \
-            //common:kernel_aarch64_dist -- --dist_dir=/kernel/out/dist
-          ls -lh /kernel/out/dist | head -30
+            //common:kernel_aarch64_dist -- --dist_dir="$BUILD_DIR/out/dist"
+          ls -lh "$BUILD_DIR/out/dist" | head -30
           echo "--- контроль версии (должно быть android14-11) ---"
-          strings /kernel/out/dist/Image | grep -m1 "6\.1\..*android14-11"
+          strings "$BUILD_DIR/out/dist/Image" | grep -m1 "6\.1\..*android14-11"
 
       - name: Артефакты
         uses: actions/upload-artifact@v4
         with:
           name: GKI-KernelSUNext-tetris
           path: |
-            /kernel/out/dist/Image
-            /kernel/out/dist/Image.lz4
-            /kernel/out/dist/System.map
+            $ env.BUILD_DIR /out/dist/Image
+            $ env.BUILD_DIR /out/dist/Image.lz4
+            $ env.BUILD_DIR /out/dist/System.map
           retention-days: 30
