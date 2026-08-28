@@ -45,7 +45,7 @@ jobs:
           git config --global color.ui false
 
       - name: Синхронизация ACK common-android14-6.1
-        working-directory: $ env.BUILD_DIR​NOTION_TWS[ ]NOTION_TWS​
+        working-directory: ${{ env.BUILD_DIR }}
         run: |
           repo init --depth=1 --no-color \
             -u https://android.googlesource.com/kernel/manifest \
@@ -57,14 +57,14 @@ jobs:
           head -1 common/Makefile
 
       - name: KernelSU-Next + снятие protected exports
-        working-directory: $ env.BUILD_DIR /common
+        working-directory: ${{ env.BUILD_DIR }}/common
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           rm -f android/abi_gki_protected_exports_aarch64 android/abi_gki_protected_exports_x86_64
           git -C KernelSU-Next log --oneline -1
 
       - name: Фрагмент defconfig (без cfg80211/mac80211/BT/SND/IKHEADERS/BPF_LSM)
-        working-directory: $ env.BUILD_DIR /common
+        working-directory: ${{ env.BUILD_DIR }}/common
         run: |
           cat >> arch/arm64/configs/gki_defconfig <<'DEFCONFIG'
           # ==== CUSTOM GKI — CMF Phone 1 (tetris), KMI android14-11 ====
@@ -171,13 +171,13 @@ jobs:
           tail -5 arch/arm64/configs/gki_defconfig
 
       - name: Отключить check_defconfig
-        working-directory: $ env.BUILD_DIR /common
+        working-directory: ${{ env.BUILD_DIR }}/common
         run: |
           sed -i -E 's/check_defconfig = "(minimized|match)"/check_defconfig = "disabled"/g' BUILD.bazel || true
           grep -n "check_defconfig" BUILD.bazel || echo "атрибут не найден — ок, работаем через --notrim"
 
       - name: Сборка (Kleaf, без LTO)
-        working-directory: $ env.BUILD_DIR​NOTION_TWS[ ]NOTION_TWS​
+        working-directory: ${{ env.BUILD_DIR }}
         run: |
           tools/bazel run --config=fast --lto=none --notrim --allow_undeclared_modules \
             //common:kernel_aarch64_dist -- --destdir="$BUILD_DIR/out/dist" \
@@ -192,7 +192,7 @@ jobs:
         with:
           name: GKI-KernelSUNext-tetris
           path: |
-            $ env.BUILD_DIR /out/dist/Image
-            $ env.BUILD_DIR /out/dist/Image.lz4
-            $ env.BUILD_DIR /out/dist/System.map
+            ${{ env.BUILD_DIR }}/out/dist/Image
+            ${{ env.BUILD_DIR }}/out/dist/Image.lz4
+            ${{ env.BUILD_DIR }}/out/dist/System.map
           retention-days: 30
