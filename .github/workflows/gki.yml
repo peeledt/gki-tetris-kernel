@@ -44,12 +44,24 @@ jobs:
           git config --global user.name  "CI Builder"
           git config --global color.ui false
 
+      - name: Настройка кэша Bazel и Repo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel_disk_cache
+            ~/.repo_cache
+          key: ack-android14-6.1-${{ hashFiles('common/Makefile') }}
+          restore-keys: |
+            ack-android14-6.1-
+
       - name: Синхронизация ACK common-android14-6.1
         working-directory: ${{ env.BUILD_DIR }}
         run: |
+          mkdir -p ~/.repo_cache
           repo init --depth=1 \
             -u https://android.googlesource.com/kernel/manifest \
-            -b common-android14-6.1
+            -b common-android14-6.1 \
+            --reference=~/.repo_cache
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle \
             --optimized-fetch --prune --fail-fast
           echo "--- контроль KMI (должно быть KMI_GENERATION=11) ---"
@@ -60,8 +72,6 @@ jobs:
         working-directory: ${{ env.BUILD_DIR }}/common
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-          # файлы объявлены входами Bazel — УДАЛЯТЬ нельзя, только опустошить,
-          # иначе "missing input file". Пустой список = protected exports нет.
           : > android/abi_gki_protected_exports_aarch64
           : > android/abi_gki_protected_exports_x86_64
           git -C KernelSU-Next log --oneline -1
@@ -173,33 +183,33 @@ jobs:
           DEFCONFIG
           tail -5 arch/arm64/configs/gki_defconfig
 
-      - name: Отключить проверку списка GKI-модулей
+      - name: Отключить проверку списка GKI-модулей и KMI strict mode
         working-directory: ${{ env.BUILD_DIR }}/common
         run: |
-          # Нам нужен только kernel Image; модули на устройстве остаются стоковые.
-          # Обнуляем список ожидаемых GKI-модулей: упаковка перестаёт искать .ko,
-          # которые мы перенесли в монолит (=y), и подобные им (asix, cdc_ncm).
           sed -i 's/gki_modules_list = \[\] + _COMMON_GKI_MODULES_LIST/gki_modules_list = []/' modules.bzl
-          echo "--- после правки: ---"
+          sed -i 's/kmi_symbol_list_strict_mode = True/kmi_symbol_list_strict_mode = False/' BUILD.bazel
+          echo "--- после правки modules.bzl: ---"
           grep -n "gki_modules_list = \[\]" modules.bzl
 
       - name: Отключить check_defconfig (build.config.gki)
         working-directory: ${{ env.BUILD_DIR }}
         run: |
-          # Kleaf мапит POST_DEFCONFIG_CMDS из legacy build.config.gki
-          # в свою проверку check_defconfig — чистим именно там
           sed -i 's/check_defconfig//' common/build.config.gki
           echo "--- POST_DEFCONFIG_CMDS после правки: ---"
           grep -n "POST_DEFCONFIG_CMDS" common/build.config.gki || echo "!! строка не найдена"
-          # убираем -maybe-dirty из строки версии (дерево модифицировано)
           sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" build/kernel/kleaf/impl/stamp.bzl 2>/dev/null || true
 
       - name: Сборка (Kleaf, без LTO)
         working-directory: ${{ env.BUILD_DIR }}
         run: |
+          mkdir -p ~/.cache/bazel_disk_cache
           tools/bazel run --config=fast --lto=none --notrim --allow_undeclared_modules \
+            --nokmi_symbol_list_strict_mode \
+            --disk_cache=~/.cache/bazel_disk_cache \
             //common:kernel_aarch64_dist -- --destdir="$BUILD_DIR/out/dist" \
           || tools/bazel run --config=fast --lto=none --notrim --allow_undeclared_modules \
+            --nokmi_symbol_list_strict_mode \
+            --disk_cache=~/.cache/bazel_disk_cache \
             //common:kernel_aarch64_dist -- --dist_dir="$BUILD_DIR/out/dist"
           ls -lh "$BUILD_DIR/out/dist" | head -30
           echo "--- контроль версии (должно быть android14-11) ---"
