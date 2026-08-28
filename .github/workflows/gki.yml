@@ -173,6 +173,16 @@ jobs:
           DEFCONFIG
           tail -5 arch/arm64/configs/gki_defconfig
 
+      - name: Убрать встроенные модули из списка GKI
+        working-directory: ${{ env.BUILD_DIR }}/common
+        run: |
+          # Эти драйверы собираются монолитно (=y) — .ko не будет.
+          # Убираем их из module_implicit_outs, иначе упаковка падает
+          # с "Unable to find ...ko".
+          sed -i -E '/^    "(drivers\/net\/mii\.ko|drivers\/net\/usb\/(ax88179_178a|cdc_ether|r8152|r8153_ecm|usbnet)\.ko|drivers\/usb\/class\/cdc-acm\.ko|drivers\/usb\/serial\/(ftdi_sio|usbserial)\.ko)",$/d' modules.bzl
+          echo "--- модулей в списке после правки: ---"
+          grep -c '\.ko' modules.bzl
+
       - name: Отключить check_defconfig (build.config.gki)
         working-directory: ${{ env.BUILD_DIR }}
         run: |
