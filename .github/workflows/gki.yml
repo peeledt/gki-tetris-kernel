@@ -1,4 +1,4 @@
-name: GKI KernelSU-Next — CMF Phone 1 (tetris, KMI android14-11)
+name: GKI IPSET Only — (KMI android14-11)
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Освободить диск (без сторонних actions)
+      - name: Освободить диск
         run: |
           sudo docker system prune -af --volumes >/dev/null 2>&1 || true
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
@@ -17,8 +17,6 @@ jobs:
                       /usr/local/share/boost /usr/share/swift 2>/dev/null || true
           sudo swapoff -a 2>/dev/null || true
           sudo rm -f /swapfile 2>/dev/null || true
-          echo "--- место после очистки ---"
-          df -h / /mnt
           AVAIL=$(df --output=avail -BG /mnt | tail -1 | tr -dc '0-9')
           AVAIL=${AVAIL:-0}
           if [ "$AVAIL" -ge 45 ]; then
@@ -26,14 +24,12 @@ jobs:
             sudo chown -R $USER:$USER /mnt/kernel
             echo "BUILD_DIR=/mnt/kernel" >> "$GITHUB_ENV"
           else
-            echo "::warning::на /mnt мало места (${AVAIL}G), собираем в workspace"
             mkdir -p "$GITHUB_WORKSPACE/kernel"
             echo "BUILD_DIR=$GITHUB_WORKSPACE/kernel" >> "$GITHUB_ENV"
           fi
 
       - name: Подготовка окружения
         run: |
-          df -h "$BUILD_DIR" && nproc && free -g
           sudo apt-get update -qq
           sudo apt-get install -y -qq git curl zip unzip rsync lz4
           mkdir -p ~/.bin
@@ -64,27 +60,14 @@ jobs:
             --reference=~/.repo_cache
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle \
             --optimized-fetch --prune --fail-fast
-          echo "--- контроль KMI (должно быть KMI_GENERATION=11) ---"
+          echo "--- Контроль KMI (android14-11) ---"
           grep -E "BRANCH|KMI_GENERATION" common/build.config.constants
-          head -1 common/Makefile
 
-      - name: KernelSU-Next + снятие protected exports
-        working-directory: ${{ env.BUILD_DIR }}/common
-        run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-          : > android/abi_gki_protected_exports_aarch64
-          : > android/abi_gki_protected_exports_x86_64
-          git -C KernelSU-Next log --oneline -1
-
-      - name: Фрагмент defconfig (без cfg80211/mac80211/BT/SND/IKHEADERS/BPF_LSM)
+      - name: Включение IPSET в defconfig
         working-directory: ${{ env.BUILD_DIR }}/common
         run: |
           cat >> arch/arm64/configs/gki_defconfig <<'DEFCONFIG'
-          # ==== CUSTOM GKI — CMF Phone 1 (tetris), KMI android14-11 ====
-          CONFIG_KSU=y
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y
+          # ==== IPSET Core & Types ====
           CONFIG_IP_SET=y
           CONFIG_IP_SET_MAX=256
           CONFIG_IP_SET_BITMAP_IP=y
@@ -103,103 +86,24 @@ jobs:
           CONFIG_IP_SET_HASH_NETPORTNET=y
           CONFIG_IP_SET_HASH_NETIFACE=y
           CONFIG_IP_SET_LIST_SET=y
-          CONFIG_NETFILTER_XT_SET=y
-          CONFIG_NF_TABLES=y
-          CONFIG_NF_TABLES_INET=y
-          CONFIG_NF_TABLES_NETDEV=y
-          CONFIG_NFT_NAT=y
-          CONFIG_NFT_TPROXY=y
-          CONFIG_NFT_SOCKET=y
-          CONFIG_NFT_COMPAT=y
-          CONFIG_NETFILTER_XT_MATCH_OSF=y
-          CONFIG_NETFILTER_XT_MATCH_RECENT=y
-          CONFIG_NETFILTER_XT_TARGET_TPROXY=y
-          CONFIG_TCP_CONG_BBR=y
-          CONFIG_DEFAULT_BBR=y
-          CONFIG_DEFAULT_TCP_CONG="bbr"
-          CONFIG_NET_SCH_CAKE=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_SYSVIPC=y
-          CONFIG_POSIX_MQUEUE=y
-          CONFIG_CGROUP_DEVICE=y
-          CONFIG_CGROUP_PIDS=y
-          CONFIG_IPC_NS=y
-          CONFIG_USER_NS=y
-          CONFIG_PID_NS=y
-          CONFIG_UTS_NS=y
-          CONFIG_NET_NS=y
-          CONFIG_BRIDGE=y
-          CONFIG_VETH=y
-          CONFIG_FHANDLE=y
-          CONFIG_SECCOMP=y
-          CONFIG_CHECKPOINT_RESTORE=y
-          CONFIG_KSM=y
-          CONFIG_NLS=y
-          CONFIG_NLS_DEFAULT="utf8"
-          CONFIG_NLS_UTF8=y
-          CONFIG_NLS_CODEPAGE_437=y
-          CONFIG_NLS_ISO8859_1=y
-          CONFIG_NTFS3_FS=y
-          CONFIG_NTFS3_64BIT_CLUSTER=y
-          CONFIG_NTFS3_LZX_XPRESS=y
-          CONFIG_NTFS3_FS_POSIX_ACL=y
-          CONFIG_CIFS=y
-          CONFIG_CIFS_ALLOW_INSECURE_LEGACY=y
-          CONFIG_ISO9660_FS=y
-          CONFIG_JOLIET=y
-          CONFIG_ZISOFS=y
-          CONFIG_UDF_FS=y
-          CONFIG_SQUASHFS=y
-          CONFIG_SQUASHFS_XATTR=y
-          CONFIG_SQUASHFS_ZLIB=y
-          CONFIG_SQUASHFS_XZ=y
-          CONFIG_SQUASHFS_LZ4=y
-          CONFIG_SQUASHFS_ZSTD=y
-          CONFIG_USB_MON=y
-          CONFIG_NET_DROP_MONITOR=y
-          CONFIG_PACKET_DIAG=y
-          CONFIG_UNIX_DIAG=y
-          CONFIG_INET_DIAG=y
-          CONFIG_INET_UDP_DIAG=y
-          CONFIG_BATMAN_ADV=y
-          CONFIG_BATMAN_ADV_BATMAN_V=y
-          CONFIG_IKCONFIG=y
-          CONFIG_IKCONFIG_PROC=y
-          CONFIG_BPF_EVENTS=y
-          CONFIG_USB_ACM=y
-          CONFIG_USB_SERIAL=y
-          CONFIG_USB_SERIAL_GENERIC=y
-          CONFIG_USB_SERIAL_CH341=y
-          CONFIG_USB_SERIAL_CP210X=y
-          CONFIG_USB_SERIAL_FTDI_SIO=y
-          CONFIG_USB_SERIAL_PL2303=y
-          CONFIG_MII=y
-          CONFIG_USB_NET_DRIVERS=y
-          CONFIG_USB_USBNET=y
-          CONFIG_USB_NET_CDCETHER=y
-          CONFIG_USB_RTL8152=y
-          CONFIG_USB_NET_AX88179_178A=y
-          CONFIG_INPUT_JOYDEV=y
-          DEFCONFIG
-          tail -5 arch/arm64/configs/gki_defconfig
 
-      - name: Отключить проверку списка GKI-модулей и KMI strict mode
+          # ==== Связка iptables с ipset ====
+          CONFIG_NETFILTER_XT_SET=y
+          DEFCONFIG
+
+      - name: Отключить strict проверки сборщика
         working-directory: ${{ env.BUILD_DIR }}/common
         run: |
           sed -i 's/gki_modules_list = \[\] + _COMMON_GKI_MODULES_LIST/gki_modules_list = []/' modules.bzl
           sed -i 's/kmi_symbol_list_strict_mode = True/kmi_symbol_list_strict_mode = False/' BUILD.bazel
-          echo "--- после правки modules.bzl: ---"
-          grep -n "gki_modules_list = \[\]" modules.bzl
 
-      - name: Отключить check_defconfig (build.config.gki)
+      - name: Отключить check_defconfig
         working-directory: ${{ env.BUILD_DIR }}
         run: |
           sed -i 's/check_defconfig//' common/build.config.gki
-          echo "--- POST_DEFCONFIG_CMDS после правки: ---"
-          grep -n "POST_DEFCONFIG_CMDS" common/build.config.gki || echo "!! строка не найдена"
           sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" build/kernel/kleaf/impl/stamp.bzl 2>/dev/null || true
 
-      - name: Сборка (Kleaf, без LTO)
+      - name: Сборка ядра (Kleaf)
         working-directory: ${{ env.BUILD_DIR }}
         run: |
           mkdir -p ~/.cache/bazel_disk_cache
@@ -211,16 +115,15 @@ jobs:
             --nokmi_symbol_list_strict_mode \
             --disk_cache=~/.cache/bazel_disk_cache \
             //common:kernel_aarch64_dist -- --dist_dir="$BUILD_DIR/out/dist"
-          ls -lh "$BUILD_DIR/out/dist" | head -30
-          echo "--- контроль версии (должно быть android14-11) ---"
+          
+          echo "--- Проверка версии KMI ---"
           strings "$BUILD_DIR/out/dist/Image" | grep -m1 "6\.1\..*android14-11"
 
-      - name: Артефакты
+      - name: Выгрузка артефактов
         uses: actions/upload-artifact@v4
         with:
-          name: GKI-KernelSUNext-tetris
+          name: GKI-ipset-tetris
           path: |
             ${{ env.BUILD_DIR }}/out/dist/Image
             ${{ env.BUILD_DIR }}/out/dist/Image.lz4
-            ${{ env.BUILD_DIR }}/out/dist/System.map
-          retention-days: 30
+          retention-days: 14
